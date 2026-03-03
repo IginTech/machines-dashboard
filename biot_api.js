@@ -43,7 +43,7 @@
     apiBase: null,
 
     /* OPTIONAL: filter the device list by template */
-    machineTemplateName: null, /* e.g. "IG-Machine" */
+    machineTemplateName: "IGIN Device", /* e.g. "IG-Machine" */
     machineTemplateId: null,   /* e.g. "3fa85f64-..." */
 
     /* OPTIONAL: tighten postMessage origin check (recommended).
