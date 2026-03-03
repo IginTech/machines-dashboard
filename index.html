@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Machines Dashboard</title>
+
+  <!-- Chart.js (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <link rel="stylesheet" href="./dashboard.css" />
+</head>
+
+<body>
+  <div class="app">
+    <!-- Left sidebar (becomes top-nav on small screens via CSS) -->
+    <aside class="sidebar" aria-label="Navigation">
+      <div class="brand">
+        <div class="brand-title">MACHINES DASHBOARD</div>
+        <!-- English comment:
+             This text is updated by JS depending on whether we are running with BioT live data
+             or in mock mode (no token / no apiBase). -->
+        <div class="brand-sub" id="dataModeText">Initializing…</div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-item" data-route="dashboard" aria-current="page">
+          <span class="nav-icon">📊</span>
+          <span>Dashboard</span>
+        </button>
+
+        <button class="nav-item" data-route="starred">
+          <span class="nav-icon">⭐</span>
+          <span>Starred</span>
+        </button>
+
+        <button class="nav-item" data-route="alerting">
+          <span class="nav-icon">🔔</span>
+          <span>Alerting</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <!-- English comment:
+             This badge is updated by JS:
+             - In mock mode: shows "MOCK DATA" guidance
+             - In BioT mode: shows "BIO T CONNECTED" (and any missing config warnings) -->
+        <div class="mock-badge" id="dataNote"></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- DASHBOARD VIEW -->
+      <section id="view-dashboard" class="view">
+        <div class="grid">
+          <!-- Glove Consumption -->
+          <section class="card">
+            <div class="card-header">
+              <div>
+                <h3 class="card-title" id="gloveTitle">Glove Consumption</h3>
+                <div class="card-sub" id="gloveSubtitle"></div>
+              </div>
+
+              <div class="controls">
+                <label for="fromDate">From</label>
+                <input id="fromDate" type="date" />
+                <label for="toDate">To</label>
+                <input id="toDate" type="date" />
+                <button class="primary" id="applyFilterBtn">Apply</button>
+                <button id="resetFilterBtn">Reset</button>
+              </div>
+            </div>
+
+            <div class="canvas-wrap">
+              <div class="canvas-box">
+                <canvas id="gloveChart" aria-label="Glove Consumption Pie Chart"></canvas>
+              </div>
+              <div class="legend" id="gloveLegend"></div>
+            </div>
+
+            <div class="mock-banner">
+              MOCK DATA: Replace glove generator/config in <b>dashboard.js</b>.
+            </div>
+          </section>
+
+          <!-- Bottom row -->
+          <div class="row-bottom">
+            <!-- DEVICES table -->
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <h3 class="card-title">DEVICES</h3>
+                  <div class="card-sub">Click headers to sort (ID / LAST CONNECTED AT / CONNECTED)</div>
+                </div>
+              </div>
+
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th class="col-star">⭐</th>
+                      <th class="sortable" data-sort="id">
+                        ID <span class="sort-ind" data-ind="id"></span>
+                      </th>
+                      <th class="sortable" data-sort="lastConnectedAt">
+                        LAST CONNECTED AT <span class="sort-ind" data-ind="lastConnectedAt"></span>
+                      </th>
+                      <th class="sortable" data-sort="connected">
+                        CONNECTED <span class="sort-ind" data-ind="connected"></span>
+                      </th>
+                      <th class="col-alert">ALERT</th>
+                    </tr>
+                  </thead>
+                  <tbody id="devicesTbody"></tbody>
+                </table>
+              </div>
+
+              <div class="mock-banner">
+                MOCK DATA: Replace devices generator/config in <b>dashboard.js</b>.
+              </div>
+            </section>
+
+            <!-- Connection status -->
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <h3 class="card-title" id="connTitle">Device Connection Status</h3>
+                  <div class="card-sub" id="connSubtitle"></div>
+                </div>
+              </div>
+
+              <div class="canvas-wrap narrow-legend">
+                <div class="canvas-box">
+                  <canvas id="connChart" aria-label="Connection Status Pie Chart"></canvas>
+                </div>
+                <div class="legend" id="connLegend"></div>
+              </div>
+
+              <div class="mock-banner">
+                MOCK DATA: Chart is computed from devices[] automatically.
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <!-- STARRED VIEW -->
+      <section id="view-starred" class="view hidden">
+        <div class="page-head">
+          <h2>⭐ Starred Devices</h2>
+          <div class="page-sub">Devices you marked with a star in the table.</div>
+        </div>
+
+        <section class="card">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th class="col-star">⭐</th>
+                  <th>ID</th>
+                  <th>LAST CONNECTED AT</th>
+                  <th>CONNECTED</th>
+                  <th>ALERT</th>
+                </tr>
+              </thead>
+              <tbody id="starredTbody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <!-- ALERTING VIEW -->
+      <section id="view-alerting" class="view hidden">
+        <div class="page-head">
+          <h2>🔔 Alerting Devices</h2>
+          <div class="page-sub" id="alertingSubtitle">Devices currently flagged with an alert (TODO: connect to BioT alerts).</div>
+        </div>
+
+        <section class="card">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th class="col-star">⭐</th>
+                  <th>ID</th>
+                  <th>LAST CONNECTED AT</th>
+                  <th>CONNECTED</th>
+                  <th>ALERT</th>
+                </tr>
+              </thead>
+              <tbody id="alertingTbody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <!-- BioT integration (tokens + API wrapper) -->
+  <script src="./biot_api.js"></script>
+  <script src="./dashboard.js"></script>
+</body>
+</html>
