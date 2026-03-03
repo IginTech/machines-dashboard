@@ -12,9 +12,9 @@
 
    Docs used (BioT official docs):
    - Token refresh: POST /ums/v2/users/token/refresh
-   - Search devices: GET /device/v2/devices?searchRequest=<ENCODED_JSON>
+   - Search devices: /device/v2/devices
    - Connection details: GET /device/v2/devices/{id}/connection/details
-   - Search raw measurements: GET /measurement/v2/measurements/raw?searchRequest=<ENCODED_JSON>
+   - Search raw measurements: /measurement/v2/measurements/raw
 
    (All endpoints are documented at docs.biot-med.com)
 */
@@ -476,12 +476,15 @@
       filter,
       sort:
       [{ prop: "_creationTime", order: "DESC" }],
-      page:
-      { page: 0, limit: 200 }
+      page: 0,
+      limit: 200
     };
 
-    const path = `/device/v2/devices?searchRequest=${encodeSearchRequest(searchRequest)}`;
-    const resp = await biotFetchJson(path);
+    const resp = await biotFetchJson("/device/v2/devices",
+    {
+      method: "POST",
+      body: searchRequest
+    });
     return extractItems(resp);
   }
 
@@ -656,11 +659,15 @@
         const searchRequest =
         {
           filter,
-          page: { page, limit }
+          page,
+          limit
         };
 
-        const path = `/measurement/v2/measurements/raw?searchRequest=${encodeSearchRequest(searchRequest)}`;
-        const resp = await biotFetchJson(path);
+        const resp = await biotFetchJson("/measurement/v2/measurements/raw",
+        {
+          method: "POST",
+          body: searchRequest
+        });
         const items = extractItems(resp);
 
         if (items.length === 0)
