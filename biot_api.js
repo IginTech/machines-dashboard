@@ -120,6 +120,40 @@
     return encodeURIComponent(JSON.stringify(reqObj));
   }
 
+  function normalizeTokenValue(tokenLike)
+  {
+    if (typeof tokenLike === "string")
+    {
+      return tokenLike;
+    }
+
+    if (tokenLike && typeof tokenLike === "object" && typeof tokenLike.token === "string")
+    {
+      return tokenLike.token;
+    }
+
+    return null;
+  }
+
+  function errorToMessage(error)
+  {
+    return String((error && error.message) ? error.message : error);
+  }
+
+  function isSearchTransportError(error)
+  {
+    const msg = errorToMessage(error);
+
+    return msg.includes("REQUEST_VALIDATION_FAILED")
+      || msg.includes("searchRequest")
+      || msg.includes("java.lang.String")
+      || msg.includes("Method Not Allowed")
+      || msg.includes("Request method")
+      || msg.includes("Required request parameter")
+      || msg.includes("415")
+      || msg.includes("405");
+  }
+
   function decodeJwtPayload(jwt)
   {
     /* Used ONLY to read exp (no validation). */
@@ -297,13 +331,22 @@
       const data = await res.json();
 
       /* Based on BioT docs, response likely contains accessJwt + refreshJwt */
-      if (data.accessJwt)
+      const nextAccessToken =
+        normalizeTokenValue(data.accessJwt)
+        || normalizeTokenValue(data.accessToken)
+        || normalizeTokenValue(data.token);
+
+      const nextRefreshToken =
+        normalizeTokenValue(data.refreshJwt)
+        || normalizeTokenValue(data.refreshToken);
+
+      if (nextAccessToken)
       {
-        session.accessToken = data.accessJwt;
+        session.accessToken = nextAccessToken;
       }
-      if (data.refreshJwt)
+      if (nextRefreshToken)
       {
-        session.refreshToken = data.refreshJwt;
+        session.refreshToken = nextRefreshToken;
       }
     }
   }
@@ -332,14 +375,21 @@
 
     if (data.type === "BIOT_TOKEN")
     {
-      if (typeof data.token === "string")
+      const refreshToken =
+        normalizeTokenValue(data.token)
+        || normalizeTokenValue(data.refreshJwt);
+
+      const accessToken =
+        normalizeTokenValue(data.accessJwt)
+        || normalizeTokenValue(data.accessToken);
+
+      if (refreshToken)
       {
         /* In BioT docs for iFrame embedding, this is typically a REFRESH token */
-        session.refreshToken = data.token;
+        session.refreshToken = refreshToken;
       }
 
-      if (typeof data.refreshJwt === "string") session.refreshToken = data.refreshJwt;
-      if (typeof data.accessJwt === "string") session.accessToken = data.accessJwt;
+      if (accessToken) session.accessToken = accessToken;
 
       /* If we have apiBase but no access token, we will refresh later */
     }
@@ -439,10 +489,53 @@
        But we keep it tolerant. */
     if (!resp) return [];
     if (Array.isArray(resp.items)) return resp.items;
+    if (Array.isArray(resp.content)) return resp.content;
+    if (Array.isArray(resp.pageContent)) return resp.pageContent;
     if (Array.isArray(resp.results)) return resp.results;
     if (Array.isArray(resp.data)) return resp.data;
     if (Array.isArray(resp)) return resp;
     return [];
+  }
+
+  async function biotSearch(path, searchRequest)
+  {
+    /* Some BioT environments accept POST search bodies, others only GET with a serialized searchRequest.
+       We try POST first, then fall back to GET only for transport/binding errors. */
+    let postError = null;
+
+    try
+    {
+      return await biotFetchJson(path,
+      {
+        method: "POST",
+        body: searchRequest
+      });
+    }
+    catch (error)
+    {
+      postError = error;
+      if (!isSearchTransportError(error))
+      {
+        throw error;
+      }
+    }
+
+    try
+    {
+      const getPath = `${path}?searchRequest=${encodeSearchRequest(searchRequest)}`;
+      return await biotFetchJson(getPath);
+    }
+    catch (getError)
+    {
+      if (!isSearchTransportError(getError))
+      {
+        throw getError;
+      }
+
+      throw new Error(
+        `BioT search failed on ${path}. POST: ${errorToMessage(postError)} | GET: ${errorToMessage(getError)}`
+      );
+    }
   }
 
   /* ------------------------------------------------------------
@@ -480,12 +573,14 @@
       limit: 200
     };
 
-    const resp = await biotFetchJson("/device/v2/devices",
-    {
-      method: "POST",
-      body: searchRequest
-    });
+    const resp = await biotSearch("/device/v2/devices", searchRequest);
     return extractItems(resp);
+  }
+
+  function toIsoOrNow(value)
+  {
+    const d = new Date(value || Date.now());
+    return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
   }
 
   function mapDeviceEntityToUi(entity)
@@ -495,25 +590,47 @@
        - Fields vary across BioT setups; adjust this mapper after seeing real JSON.
     */
 
-    const id = entity._id || entity.id || entity.deviceId || "UNKNOWN";
+    const id =
+      entity.uniqueId
+      || entity._uniqueId
+      || entity._deviceUniqueId
+      || entity.deviceId
+      || entity._name
+      || entity.name
+      || entity._id
+      || entity.id
+      || "UNKNOWN";
 
     const conn = (entity._status && entity._status._connection) ? entity._status._connection : null;
-    const connected = (conn && typeof conn._connected === "boolean") ? conn._connected : false;
+    const hasConnectedFlag =
+      (conn && typeof conn._connected === "boolean")
+      || (typeof entity.connected === "boolean")
+      || (typeof entity._connected === "boolean");
+
+    const connected =
+      (conn && typeof conn._connected === "boolean") ? conn._connected :
+      (typeof entity.connected === "boolean") ? entity.connected :
+      (typeof entity._connected === "boolean") ? entity._connected :
+      false;
 
     /* Try a few common names for last seen time */
     const last =
-      (conn && (conn._lastConnectedAt || conn._lastSeenAt || conn._lastSeenTime || conn._lastConnectionTime))
+      entity.lastConnectedAt
+      || entity._lastConnectedAt
+      || (conn && (conn._lastConnectedAt || conn._lastSeenAt || conn._lastSeenTime || conn._lastConnectionTime))
       || entity._lastModifiedTime
       || entity._updatedTime
       || entity._creationTime
-      || new Date().toISOString();
+      || entity.createdAt
+      || null;
 
     return {
       id,
       connected,
       alerting: false, /* TODO: wire to BioT alerts once we decide the source */
       starred: false,  /* we override from localStorage in dashboard.js */
-      lastConnectedAt: new Date(last).toISOString()
+      lastConnectedAt: toIsoOrNow(last),
+      _needsConnectionDetails: !hasConnectedFlag || !last
     };
   }
 
@@ -547,7 +664,8 @@
     return {
       ...fallback,
       connected,
-      lastConnectedAt: new Date(last).toISOString()
+      lastConnectedAt: toIsoOrNow(last),
+      _needsConnectionDetails: false
     };
   }
 
@@ -556,29 +674,33 @@
     const entities = await searchDevices();
     const base = entities.map(mapDeviceEntityToUi);
 
-    /* Optional: call connection/details per device for accurate live values.
-       If performance becomes an issue, disable this and rely on _status._connection from searchDevices. */
-    const SHOULD_FETCH_DETAILS = true;
+    const missingConnectionData = base.filter(d => d._needsConnectionDetails);
 
-    if (!SHOULD_FETCH_DETAILS)
+    if (missingConnectionData.length === 0)
     {
-      return base;
+      return base.map(({ _needsConnectionDetails, ...device }) => device);
     }
 
-    const enriched = await mapLimit(base, 8, async (d) =>
+    const enriched = [...base];
+
+    await mapLimit(missingConnectionData, 8, async (d) =>
     {
       try
       {
         const details = await getConnectionDetails(d.id);
-        return mapConnDetailsToUi(details, d);
+        const index = enriched.findIndex(item => item.id === d.id);
+        if (index >= 0)
+        {
+          enriched[index] = mapConnDetailsToUi(details, d);
+        }
       }
       catch
       {
-        return d;
+        /* keep the base device shape if details fail */
       }
     });
 
-    return enriched;
+    return enriched.map(({ _needsConnectionDetails, ...device }) => device);
   }
 
   /* ------------------------------------------------------------
@@ -663,11 +785,7 @@
           limit
         };
 
-        const resp = await biotFetchJson("/measurement/v2/measurements/raw",
-        {
-          method: "POST",
-          body: searchRequest
-        });
+        const resp = await biotSearch("/measurement/v2/measurements/raw", searchRequest);
         const items = extractItems(resp);
 
         if (items.length === 0)

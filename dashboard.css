@@ -109,6 +109,20 @@ body
   border-radius: 12px;
 }
 
+.mock-badge.live
+{
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+
+.mock-badge.error
+{
+  color: #991b1b;
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
 /* Main */
 .main
 {
@@ -452,4 +466,3 @@ th.sortable
 
   .brand-title { font-size: 14px; }
 }
-

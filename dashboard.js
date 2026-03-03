@@ -22,7 +22,6 @@ let connChart = null;
 let sortState = { key: "lastConnectedAt", dir: "desc" };
 
 let dataMode = "mock"; /* "mock" | "biot" */
-let gloveTotalsOverride = null; /* In BioT mode we use totals directly (no events) */
 
 const STAR_STORAGE_KEY = "machines_dashboard_starred_ids";
 
@@ -119,6 +118,40 @@ function setHtml(id, html)
 {
   const el = document.getElementById(id);
   if (el) el.innerHTML = html;
+}
+
+function setDataNoteTone(tone)
+{
+  const el = document.getElementById("dataNote");
+  if (!el) return;
+
+  el.classList.toggle("live", tone === "live");
+  el.classList.toggle("error", tone === "error");
+}
+
+function setMockBannersVisible(visible)
+{
+  document.querySelectorAll(".mock-banner").forEach(el =>
+  {
+    el.style.display = visible ? "" : "none";
+  });
+}
+
+function getBiotStatusText()
+{
+  const g = window.BiotApi.config.gloveMeasurement;
+  const attrs = Object.values(g.attributesByType || {});
+  const hasPlaceholders = attrs.some(a => String(a).startsWith("glove_"));
+
+  return hasPlaceholders
+    ? "BIO T CONNECTED | Glove mapping is still placeholder (edit biot_api.js)"
+    : "BIO T CONNECTED";
+}
+
+function shortError(error)
+{
+  const raw = String((error && error.message) ? error.message : error);
+  return raw.length > 220 ? `${raw.slice(0, 217)}...` : raw;
 }
 
 function loadStarredIds()
@@ -288,13 +321,13 @@ function renderLegend(container, labels, values, colors, total)
     const pct = total > 0 ? Math.round((val / total) * 100) : 0;
 
     const row = document.createElement("div");
-    row.className = "legend-row";
+    row.className = "legend-item";
 
     const left = document.createElement("div");
     left.className = "legend-left";
 
     const dot = document.createElement("span");
-    dot.className = "legend-dot";
+    dot.className = "swatch";
     dot.style.background = colors[label] || "#999";
 
     const name = document.createElement("span");
@@ -393,14 +426,11 @@ async function refreshGloveChart()
     try
     {
       totals = await window.BiotApi.getGloveTotals(fromIso, toIso, devices);
-      gloveTotalsOverride = totals;
     }
     catch (e)
     {
-      /* If glove model is not configured yet, we show an explicit message and keep mock totals. */
-      gloveTotalsOverride = null;
-
-      setText("gloveSubtitle", `BioT error: ${String(e.message || e)}`);
+      /* In live mode we keep the dashboard usable, but surface the API error clearly. */
+      setText("gloveSubtitle", `BioT error: ${shortError(e)}`);
       totals = sumGlovesByType(filterGloveEvents(from, to));
     }
   }
@@ -793,6 +823,8 @@ async function loadDevicesFromBiot()
 function setUiModeMock()
 {
   setText("dataModeText", "Mock data prototype");
+  setDataNoteTone("mock");
+  setMockBannersVisible(true);
   setHtml("dataNote", 'MOCK DATA: Replace the config + generators in <b>dashboard.js</b>.');
 }
 
@@ -800,20 +832,16 @@ function setUiModeBiot()
 {
   const org = window.BiotApi.session.orgId ? ` | Org: ${window.BiotApi.session.orgId}` : "";
   setText("dataModeText", `BioT live data${org}`);
+  setDataNoteTone("live");
+  setMockBannersVisible(false);
+  setText("dataNote", getBiotStatusText());
+}
 
-  /* If glove mapping is still placeholder, hint it explicitly */
-  const g = window.BiotApi.config.gloveMeasurement;
-  const attrs = Object.values(g.attributesByType || {});
-  const hasPlaceholders = attrs.some(a => String(a).startsWith("glove_"));
-
-  if (hasPlaceholders)
-  {
-    setHtml("dataNote", 'BIO T CONNECTED ✅ &nbsp; | &nbsp; <b>Glove mapping is still placeholder</b> (edit <b>biot_api.js</b> → BIOT_CONFIG.gloveMeasurement.attributesByType).');
-  }
-  else
-  {
-    setHtml("dataNote", 'BIO T CONNECTED ✅');
-  }
+function setUiModeBiotError(error)
+{
+  setDataNoteTone("error");
+  setMockBannersVisible(false);
+  setText("dataNote", `${getBiotStatusText()} | ${shortError(error)}`);
 }
 
 /* ============================================================
@@ -835,7 +863,16 @@ async function boot()
     setUiModeBiot();
 
     /* Step 4A: Pull real devices */
-    await loadDevicesFromBiot();
+    try
+    {
+      await loadDevicesFromBiot();
+      setUiModeBiot();
+    }
+    catch (e)
+    {
+      devices = [];
+      setUiModeBiotError(`Device load failed: ${e}`);
+    }
 
     /* Step 5A: Pull glove totals for default date range */
     await refreshGloveChart();
@@ -847,10 +884,11 @@ async function boot()
       try
       {
         await loadDevicesFromBiot();
+        setUiModeBiot();
       }
-      catch
+      catch (e)
       {
-        /* ignore periodic errors */
+        setUiModeBiotError(`Device refresh failed: ${e}`);
       }
     }, interval);
   }
